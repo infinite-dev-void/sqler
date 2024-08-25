@@ -1,0 +1,14 @@
+[package]
+name = "sqler_macros"
+version = "0.0.1-alpha"
+edition = "2021"
+description = "procedural macros for sqler crate"
+license = "MIT OR Apache-2.0"
+
+
+[lib]
+proc-macro = true
+
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
