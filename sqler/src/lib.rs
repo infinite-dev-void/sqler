@@ -1,3 +1,5 @@
+//! `SQLer` is a crate helps in building SQL queries using some of Rust syntax via the procedural macro 'sql'
+
 mod xss_string;
 
 pub use xss_string::XssString;

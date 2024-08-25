@@ -12,6 +12,21 @@ struct XssChar {
     replace_with: &'static str,
 }
 
+/// struct that handle XSS scripts within String.
+///
+/// Example:
+///
+/// ```
+/// let comment = sqler::XssString(String::from(r#"<script>"'&</script>"#));
+///
+/// let query = sqler::sql!(
+///     INSERT INTO comments (comment) VALUES ({comment})
+/// );
+///
+/// assert_eq!(
+///     query,
+///     "INSERT INTO comments (comment) VALUES ('&lt;script&gt;&#34;&#39;&amp;&lt;/script&gt;')"
+/// );
 pub struct XssString(pub String);
 
 impl XssString {
