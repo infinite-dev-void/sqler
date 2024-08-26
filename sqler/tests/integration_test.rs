@@ -130,3 +130,17 @@ fn sql_update() {
         "UPDATE users SET user_name = 'Ali', last_name = 'Ahmed', age = 15 WHERE user_id = 120"
     )
 }
+
+#[test]
+fn sql_join() {
+    assert_eq!(
+        sql!(
+            SELECT *
+            FROM users AS u
+
+            LEFT JOIN employees AS e
+            ON e.emp_id=u.user_id
+        ),
+        "SELECT * FROM users AS u LEFT JOIN employees AS e ON e.emp_id = u.user_id"
+    );
+}
