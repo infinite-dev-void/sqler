@@ -5,6 +5,29 @@
 
 use proc_macro::{Delimiter, Group, Ident, Literal, Punct, TokenStream, TokenTree};
 
+mod vars;
+use vars::*;
+
+mod hprs;
+use hprs::*;
+
+mod stmt_sg;
+use stmt_sg::*;
+
+mod need_space;
+use need_space::*;
+
+/// Convert Rust token stream to a String SQL Statement
+/// and concatenate any variable between curly braces.
+#[proc_macro]
+pub fn sql(ts: TokenStream) -> TokenStream {
+    let mut sqler = Sqler::new();
+
+    let sql = sqler.construct_from_rust(ts);
+
+    sql
+}
+
 /* fn count_hash_in_raw_string(s: &String) -> usize {
     let mut hash_count: usize = 0;
 
@@ -19,7 +42,7 @@ use proc_macro::{Delimiter, Group, Ident, Literal, Punct, TokenStream, TokenTree
     hash_count
 } */
 struct Sqler {
-    stmt_sg: String,
+    stmt_sg: StmtSg,
     stmt_len: usize,
     stmt_sgs: Vec<String>,
     vars: Vars,
@@ -28,7 +51,7 @@ struct Sqler {
 impl Sqler {
     fn new() -> Sqler {
         Sqler {
-            stmt_sg: String::new(),
+            stmt_sg: StmtSg::new(),
             stmt_len: 0,
             stmt_sgs: Vec::new(),
             vars: Vars::new(),
@@ -39,12 +62,9 @@ impl Sqler {
         for tt in ts {
             self.match_token_tree(tt);
         }
-
-        self.stmt_sg = self.stmt_sg.trim().to_owned();
         if self.stmt_sg.len() > 0 {
             self.stmt_len += self.stmt_sg.len();
-            self.stmt_sgs
-                .push(String::from("\"") + &self.stmt_sg + "\"");
+            self.stmt_sgs.push(self.stmt_sg.construct());
         }
 
         self.construct()
@@ -74,20 +94,23 @@ impl Sqler {
         let l = l.to_string();
 
         if l.starts_with('"') {
-            self.stmt_sg.push('\'');
+            let mut sg = String::from('\'');
 
-            self.stmt_sg.push_str(&l[1..l.len() - 1].replace("'", "''"));
+            sg.push_str(&l[1..l.len() - 1].replace("'", "''"));
 
-            self.stmt_sg.push_str("' ");
+            sg.push('\'');
+
+            self.stmt_sg.add_token(false, &sg, false);
 
             return;
         }
 
         if l.starts_with('\'') {
-            self.stmt_sg.push('\'');
-            self.stmt_sg.push_str(&l[1..2]);
-            self.stmt_sg.push_str("' ");
-
+            let mut sg = String::from('\'');
+            sg.push('\'');
+            sg.push_str(&l[1..2].replace("'", "''"));
+            sg.push('\'');
+            self.stmt_sg.add_token(false, &sg, true);
             return;
         }
 
@@ -124,9 +147,11 @@ impl Sqler {
     }
 
     fn handle_literal_number(&mut self, num: String) {
-        self.stmt_sg
-            .push_str(&remove_num_prefix_suffix(num).replace("_", ""));
-        self.stmt_sg.push(' ');
+        self.stmt_sg.add_token(
+            false,
+            &remove_num_prefix_suffix(num).replace("_", ""),
+            false,
+        );
     }
 
     fn handle_group(&mut self, g: Group) {
@@ -159,96 +184,122 @@ impl Sqler {
         self.stmt_sgs.push(String::from("&") + var_name);
 
         self.vars.add(var_name);
-        self.stmt_sg = String::from(' ');
+        self.stmt_sg = StmtSg::new();
     }
 
     #[inline]
     fn add_stmt_sg_to_sgs(&mut self) {
         self.stmt_len += self.stmt_sg.len();
 
-        self.stmt_sgs
-            .push(String::from("\"") + &self.stmt_sg + "\"");
+        self.stmt_sgs.push(self.stmt_sg.construct());
     }
 
     // [] array or cast
     #[inline]
     fn handle_group_bracket(&mut self, g: Group) {
-        self.stmt_sg.push('[');
+        self.stmt_sg.add_token(false, "[", false);
         for tt in g.stream() {
             self.match_token_tree(tt);
         }
-        delete_last_space_from_string(&mut self.stmt_sg);
-        self.stmt_sg.push_str("] ");
+
+        self.stmt_sg.add_token(false, "]", false);
     }
 
     #[inline]
     fn handle_group_parenthesis(&mut self, g: Group) {
-        self.stmt_sg.push('(');
+        self.stmt_sg.add_token(false, "(", false);
         for tt in g.stream() {
             self.match_token_tree(tt);
         }
 
-        delete_last_space_from_string(&mut self.stmt_sg);
-        self.stmt_sg.push_str(") ");
+        self.stmt_sg.add_token(false, ")", false);
     }
 
     fn handle_ident(&mut self, i: Ident) {
-        self.stmt_sg.push_str(&i.to_string());
-        self.stmt_sg.push(' ');
+        let i = i.to_string();
+        let lower_i = i.to_lowercase();
+
+        self.stmt_sg.add_token(
+            IDENT_NEED_LEADING_SPACE.contains(&&lower_i[..]),
+            &i,
+            IDENT_NEED_TRAILING_SPACE.contains(&&lower_i[..]),
+        );
     }
+
+    /*     fn handle_ident_leading_space(&mut self, i: &String) {
+           if self.stmt_sg.ends_with(' ') {
+               return;
+           }
+
+           for ident in [
+               "OR", "AND", "BETWEEN", "LEFT", "RIGHT", "CROSS", "JOIN", "LITERAL",
+           ] {
+               if i == ident {
+                   self.stmt_sg.push(' ');
+                   return;
+               };
+           }
+       }
+    */
     /*
     '=', '<', '>', '!', '~', '+', '-', '*', '/', '%', '^', '&', '|', '@', '.', ',', ';',
                ':', '#', '$', '?', '\'', */
     fn handle_punct(&mut self, p: Punct) {
         let c = p.as_char();
+        /* self.handle_punct_leading_space(c); */
 
-        if c == ',' {
-            delete_last_space_from_string(&mut self.stmt_sg);
-
-            self.stmt_sg.push_str(", ");
-            return;
-        }
-
-        if c == '*' {
-            self.stmt_sg.push_str("* ");
-            return;
-        }
-
-        if c == '=' {
-            self.stmt_sg.push_str("= ");
-            return;
-        }
-
-        if c == '|' {
-            self.stmt_sg.push_str(if self.stmt_sg.ends_with("|") {
-                "| "
-            } else {
-                " |"
-            });
-
-            return;
-        };
-
-        if c == '&' {
-            self.stmt_sg.push_str(if self.stmt_sg.ends_with("&") {
-                "& "
-            } else {
-                " &"
-            });
-
-            return;
-        };
-
-        if c == ':' {
-            delete_last_space_from_string(&mut self.stmt_sg);
-            self.stmt_sg.push(':');
-
-            return;
-        };
-
-        self.stmt_sg.push(c);
+        self.stmt_sg.add_token(false, &c.to_string(), false);
+        /* self.handle_punct_trailing_space(c); */
     }
 
+    /*    #[inline]
+       fn handle_punct_leading_space(&mut self, p: char) {
+           if p == '=' {
+               if self.stmt_sg.ends_with("> ") || self.stmt_sg.ends_with("< ") {
+                   remove_space_at_end(&mut self.stmt_sg);
+                   return;
+               }
+               if self.stmt_sg.ends_with('!') {
+                   return;
+               }
+           }
+
+           if p == '>' && self.stmt_sg.ends_with("< ") {
+               remove_space_at_end(&mut self.stmt_sg);
+               return;
+           }
+
+           for pucnt in ['.', ':', ','] {
+               if pucnt == p {
+                   remove_space_at_end(&mut self.stmt_sg);
+                   return;
+               }
+           }
+
+           for punct in ['&', '|'] {
+               if punct == p {
+                   if self.stmt_sg.ends_with(punct) {
+                       return;
+                   }
+                   add_space_at_end(&mut self.stmt_sg);
+                   return;
+               };
+           }
+
+           // Duplicate because other possibilities may be added in the future.
+           add_space_at_end(&mut self.stmt_sg);
+       }
+
+       #[inline]
+       fn handle_punct_trailing_space(&mut self, p: char) {
+           for punct in ['*', '=', '<', '>', '+', '-', '/', ','] {
+               if punct == p {
+                   add_space_at_end(&mut self.stmt_sg);
+                   return;
+               }
+           }
+       }
+    */
     fn construct(&mut self) -> TokenStream {
         if self.stmt_sgs.len() == 1 {
             return (String::from("String::from(") + &self.stmt_sgs[0] + ")")
@@ -259,127 +310,23 @@ impl Sqler {
         let mut stmt = String::new();
         stmt.push_str("{\n");
 
-        for var in &self.vars.0 {
-            stmt.push_str("let ");
-            stmt.push_str(&var.name);
-            stmt.push_str(" = ::sqler::VarToSql::sql(&");
-            stmt.push_str(&var.name);
-            stmt.push_str(");\n");
-        }
+        stmt.push_str(&self.vars.construct_defs_of_vars());
 
         stmt.push_str("let mut ___sql___ = String::with_capacity(");
         stmt.push_str(&self.stmt_len.to_string());
 
-        for var in &self.vars.0 {
-            stmt.push_str(" + ");
-            stmt.push_str(&var.name);
-            stmt.push_str(".len()");
-            if var.count > 1 {
-                stmt.push_str(" * ");
-                stmt.push_str(&var.count.to_string());
-            }
-        }
+        stmt.push_str(&self.vars.construct_getting_len_of_vars());
 
         stmt.push_str(");\n");
 
         for sg in &self.stmt_sgs {
             stmt.push_str("___sql___.push_str(");
-            stmt.push_str(sg);
+            stmt.push_str(&sg);
             stmt.push_str(");\n");
         }
 
         stmt.push_str("___sql___\n}");
 
         stmt.parse().unwrap()
-    }
-}
-
-/// Convert Rust token stream to a String SQL Statement
-/// and concatenate any variable between curly braces.
-#[proc_macro]
-pub fn sql(ts: TokenStream) -> TokenStream {
-    let mut sqler = Sqler::new();
-    sqler.construct_from_rust(ts)
-}
-
-// Used to count the number of times a variable appears.
-struct Var {
-    name: String,
-    count: usize,
-}
-
-// Used to count the number of times each variable appears..
-struct Vars(Vec<Var>);
-
-impl Vars {
-    fn new() -> Vars {
-        Vars(Vec::new())
-    }
-
-    fn add(&mut self, name: &str) {
-        for var in self.0.iter_mut() {
-            if var.name == name {
-                var.count += 1;
-                return;
-            }
-        }
-        self.0.push(Var {
-            name: name.to_owned(),
-            count: 1,
-        });
-    }
-}
-
-// Remove the suffix at the end of the number if exists
-// Example: (15i32 -> 15, 101usize -> 101, 7 -> 7)
-
-fn remove_num_suffix(n: String) -> String {
-    match n.find('i') {
-        Some(idx) => {
-            return n[0..idx].to_string();
-        }
-        _ => {}
-    };
-
-    match n.find('u') {
-        Some(idx) => {
-            return n[0..idx].to_string();
-        }
-        _ => {}
-    };
-
-    n
-}
-
-// Remove prefix and suffix from the number if exist.
-// As a side effect of removing the prefix from the
-// number, it will be converted back to decimal.
-// example: (0x1fusize -> 31, 0o77 -> 63, 10 -> 10)
-
-fn remove_num_prefix_suffix(n: String) -> String {
-    if n.starts_with("0x") {
-        return i128::from_str_radix(&remove_num_suffix(n)[2..], 16)
-            .unwrap()
-            .to_string();
-    };
-
-    if n.starts_with("0o") {
-        return i128::from_str_radix(&remove_num_suffix(n)[2..], 8)
-            .unwrap()
-            .to_string();
-    };
-
-    if n.starts_with("0b") {
-        return i128::from_str_radix(&remove_num_suffix(n)[2..], 2)
-            .unwrap()
-            .to_string();
-    };
-
-    return remove_num_suffix(n);
-}
-
-fn delete_last_space_from_string(s: &mut String) {
-    if s.ends_with(' ') {
-        *s = String::from(&s[0..s.len() - 1]);
     }
 }
