@@ -17,6 +17,13 @@ impl VarToSql for String {
     }
 }
 
+impl VarToSql for str {
+    #[inline]
+    fn sql(&self) -> String {
+        String::from("'") + &self.replace("'", "''") + "'"
+    }
+}
+
 impl VarToSql for i8 {
     #[inline]
     fn sql(&self) -> String {
