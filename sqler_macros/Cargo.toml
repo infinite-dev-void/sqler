@@ -1,7 +1,9 @@
 [package]
 name = "sqler_macros"
-version = "0.0.1-alpha"
+version = "0.0.1-beta"
 edition = "2021"
+authors = ["Marwan Hilal"]
+repository = "https://github.com/infinite-dev-void/sqler"
 description = "procedural macros for sqler crate"
 license = "MIT OR Apache-2.0"
 
