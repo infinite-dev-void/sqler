@@ -21,7 +21,7 @@ fn sql_with_line_feed() {
 fn sql_with_string() {
     assert_eq!(
         sql! {SELECT * FROM users WHERE user_name="ali"},
-        String::from("SELECT * FROM users WHERE user_name = 'ali'")
+        String::from("SELECT * FROM users WHERE user_name='ali'")
     )
 }
 
@@ -29,7 +29,7 @@ fn sql_with_string() {
 fn sql_with_escaped_string() {
     assert_eq!(
         sql! {SELECT * FROM users WHERE user_name="al\"i"},
-        String::from("SELECT * FROM users WHERE user_name = 'al\"i'")
+        String::from("SELECT * FROM users WHERE user_name='al\"i'")
     )
 }
 /*
@@ -48,7 +48,7 @@ fn sql_with_vars() {
     let age = 24;
     assert_eq!(
         sql! {SELECT * FROM users WHERE user_name={user_name} AND age = {age}},
-        String::from("SELECT * FROM users WHERE user_name = 'ali' AND age = 24")
+        String::from("SELECT * FROM users WHERE user_name='ali' AND age=24")
     )
 }
 
@@ -57,7 +57,7 @@ fn sql_with_repeated_vars() {
     let name = String::from("ahmed");
     assert_eq!(
         sql! {SELECT * FROM users WHERE first_name={ name } OR last_name= {name}},
-        String::from("SELECT * FROM users WHERE first_name = 'ahmed' OR last_name = 'ahmed'")
+        String::from("SELECT * FROM users WHERE first_name='ahmed' OR last_name='ahmed'")
     )
 }
 
@@ -65,7 +65,7 @@ fn sql_with_repeated_vars() {
 fn sql_with_prefixed_nums() {
     assert_eq!(
         sql! {SELECT * FROM users WHERE age = 0x1f OR age = 0o77 OR age = 0b1011},
-        String::from("SELECT * FROM users WHERE age = 31 OR age = 63 OR age = 11")
+        String::from("SELECT * FROM users WHERE age=31 OR age=63 OR age=11")
     )
 }
 
@@ -73,7 +73,7 @@ fn sql_with_prefixed_nums() {
 fn sql_with_suffixed_nums() {
     assert_eq!(
         sql! {SELECT * FROM users WHERE age = 10i32 OR age = 15isize OR age = 30u64},
-        String::from("SELECT * FROM users WHERE age = 10 OR age = 15 OR age = 30")
+        String::from("SELECT * FROM users WHERE age=10 OR age=15 OR age=30")
     )
 }
 
@@ -81,7 +81,7 @@ fn sql_with_suffixed_nums() {
 fn sql_with_nums_with_under_score() {
     assert_eq!(
         sql! {SELECT * FROM users WHERE age = 2_5 OR age = 3_5 OR age = 10_0},
-        String::from("SELECT * FROM users WHERE age = 25 OR age = 35 OR age = 100")
+        String::from("SELECT * FROM users WHERE age=25 OR age=35 OR age=100")
     )
 }
 
@@ -89,7 +89,7 @@ fn sql_with_nums_with_under_score() {
 fn sql_with_prefixed_suffixed_nums_with_under_score() {
     assert_eq!(
         sql! {SELECT * FROM users WHERE age = 0x1fi16 OR age = 0o77i8 OR age = 0b1011u8 OR age = 15_2i128},
-        String::from("SELECT * FROM users WHERE age = 31 OR age = 63 OR age = 11 OR age = 152")
+        String::from("SELECT * FROM users WHERE age=31 OR age=63 OR age=11 OR age=152")
     )
 }
 
@@ -98,7 +98,7 @@ fn sql_with_xss_string() {
     let first_name = XssString(String::from("&ahmed <h1>"));
     assert_eq!(
         sql! {SELECT * FROM users WHERE first_name = {first_name}},
-        String::from("SELECT * FROM users WHERE first_name = '&amp;ahmed &lt;h1&gt;'")
+        String::from("SELECT * FROM users WHERE first_name='&amp;ahmed &lt;h1&gt;'")
     )
 }
 
@@ -108,13 +108,16 @@ fn sql_insert_with_array() {
     let per2 = String::from("edit user");
     let user_name = String::from("sqler");
 
-    assert_eq!(sql!(
+    let query = sql!(
         INSERT INTO users
             (user_name, permissions)
         VALUES
             ({user_name}, ARRAY[{per1}, {per2}, "delete user"]::TEXT [])
-    ),
-    "INSERT INTO users (user_name, permissions) VALUES ('sqler', ARRAY ['create user', 'edit user', 'delete user']::TEXT [])"
+    );
+
+    assert_eq!(
+        query,
+        "INSERT INTO users(user_name,permissions) VALUES ('sqler',ARRAY['create user','edit user','delete user']:: TEXT[])"
 );
 }
 
@@ -123,11 +126,14 @@ fn sql_update() {
     let last_name = String::from("Ahmed");
     let age = 15;
     let user_id: isize = 120;
+
+    let query = sql!(
+        UPDATE users SET user_name="Ali", last_name={last_name}, age = {age} WHERE user_id={user_id}
+    );
+
     assert_eq!(
-        sql!(
-            UPDATE users SET user_name="Ali", last_name={last_name}, age = {age} WHERE user_id={user_id}
-        ),
-        "UPDATE users SET user_name = 'Ali', last_name = 'Ahmed', age = 15 WHERE user_id = 120"
+        query,
+        "UPDATE users SET user_name='Ali',last_name='Ahmed',age=15 WHERE user_id=120"
     )
 }
 
@@ -137,10 +143,95 @@ fn sql_join() {
         sql!(
             SELECT *
             FROM users AS u
-
             LEFT JOIN employees AS e
             ON e.emp_id=u.user_id
         ),
-        "SELECT * FROM users AS u LEFT JOIN employees AS e ON e.emp_id = u.user_id"
+        "SELECT * FROM users AS u LEFT JOIN employees AS e ON e.emp_id=u.user_id"
+    );
+
+    assert_eq!(
+        sql!(
+            SELECT *
+            FROM users AS u
+            RIGHT JOIN employees AS e
+            ON e.emp_id=u.user_id
+        ),
+        "SELECT * FROM users AS u RIGHT JOIN employees AS e ON e.emp_id=u.user_id"
+    );
+
+    assert_eq!(
+        sql!(
+            SELECT *
+            FROM users AS u
+            JOIN employees AS e
+            ON e.emp_id=u.user_id
+        ),
+        "SELECT * FROM users AS u JOIN employees AS e ON e.emp_id=u.user_id"
+    );
+
+    assert_eq!(
+        sql!(
+            SELECT *
+            FROM users AS u
+            INNER JOIN employees AS e
+            ON e.emp_id=u.user_id
+        ),
+        "SELECT * FROM users AS u INNER JOIN employees AS e ON e.emp_id=u.user_id"
+    );
+
+    assert_eq!(
+        sql!(
+            SELECT *
+            FROM users AS u
+            OUTER JOIN employees AS e
+            ON e.emp_id=u.user_id
+        ),
+        "SELECT * FROM users AS u OUTER JOIN employees AS e ON e.emp_id=u.user_id"
+    );
+}
+
+#[test]
+fn sql_gte_lte_neq() {
+    assert_eq!(
+        sql!(
+            SELECT * FROM users WHERE user_id >= 10 OR user_id <= 5 AND user_id != 1 AND user_id <> 2
+
+        ),
+        "SELECT * FROM users WHERE user_id>=10 OR user_id<=5 AND user_id!=1 AND user_id<>2"
+    );
+}
+
+#[test]
+
+fn sql_fns_call() {
+    assert_eq!(
+        sql!(
+            SELECT
+                COUNT(*),
+                JSON_BUILD_OBJECT("userId", user_id, "userName", user_name)
+            FROM users
+
+        ),
+        "SELECT COUNT(*),JSON_BUILD_OBJECT('userId',user_id,'userName',user_name) FROM users"
+    );
+}
+
+#[test]
+fn sql_delete() {
+    assert_eq!(
+        sql!(
+            DELETE FROM users WHERE user_id IN (1, 2, 3)
+        ),
+        "DELETE FROM users WHERE user_id IN (1,2,3)"
+    );
+}
+
+#[test]
+fn sql_select_as() {
+    assert_eq!(
+        sql!(
+            SELECT "Ali" AS first_name, "Ahmed" AS last_name
+        ),
+        "SELECT 'Ali' AS first_name,'Ahmed' AS last_name",
     );
 }
